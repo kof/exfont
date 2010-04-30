@@ -57,7 +57,7 @@ function exfont( elem, options ) {
     var self = {},
         s = $.extend(true, {}, $.fn.exfont.defaults, options),
         $elem = $(elem),
-        $flash,
+        flashElem,
         // save original element size, because we will restore it
         _elemSize ,
         loaded = false;
@@ -76,15 +76,16 @@ function exfont( elem, options ) {
         
         // global callback name, make it short because space is needed for jsonp
         // increase timestamp each time, because new Date isn't always correct in miliseconds area 
-        var callback = 'exf' + timestamp++;
+        var callbackName = 'exf' + timestamp++;
 
         // cache original css dimensions
         _elemSize = {
             width: elem.width || null,
             height: elem.height || null
         };
-        
-        window[callback] = function( status, data ) {
+
+        window[callbackName] = function jsonpCallback( status, data ) {
+            // if status is error, then data is the error message
             if (status == 'error') return $.error(data);
 
             var flashvars = {
@@ -92,35 +93,41 @@ function exfont( elem, options ) {
                 textAlign: s.textAlign,
                 fontWeight: s.fontWeight,
                 color: s.color,
-                callback: callback,
+                callback: callbackName,
                 enableFrame: !!s.frameSize,
                 frameColor: s.frameColor,
                 frameSize: s.frameSize,
                 wordWrap: s.wordWrap
             };
-            
+
             s.width && (flashvars.width = s.width);
             s.height && (flashvars.height = s.height);
 
-            $.extend(true, s.flashSettings, {
-                swf: data,
-                params: { flashvars: flashvars }
-            });
-            
-            
+            var flashSettings = $.extend(true, {
+                    swf: data,
+                    params: {flashvars: flashvars}
+                }, s.flashSettings);
+
             // reuse the same global namespace
-            window[callback] = function( width, height ) {
+            window[callbackName] = function flashCallback( width, height ) {
+                flashElem = $elem.flash('get');
+                // exfont getter and setter methods are sometimes later available on IE
+                if ( !flashElem || !flashElem.exfontGet ) {
+                    return setTimeout(function(){
+                        flashCallback(width, height);    
+                    }, 50);
+                }
+                
                 // set flash size
-                try{ resize({ width: width, height: height }) } catch(e){};
+                resize({width: width, height: height});
                 loaded = true;
                 // call the onload callback
                 s.onload.call(elem, s); 
                 $elem.trigger('exfontonload', [width, height]);
                 // delete global namespace
-                try{ delete window[callback]; } catch(e) { window[callback] = undefined; };
+                try{ delete window[callbackName]; } catch(e) { window[callbackName] = undefined; };
             };
 
-            // init flash
             $elem.addClass('exfont')
             // if no width or height given take the dome node dimension temporary, 
             // it will be overwritten after flash is loaded
@@ -129,12 +136,10 @@ function exfont( elem, options ) {
                 height: s.height || $elem.height()
             });
             
-            function ready() {
-                $elem.flash(s.flashSettings);
-                $flash = $elem.flash('get');
-            }            
-            
-            s.onready ? $(ready) : ready();
+            // load flash file after the document is ready is onready is true
+            s.onready ? $(function(){ 
+                $elem.flash(flashSettings); 
+            }) : $elem.flash(flashSettings);
         };
         
         $.ajax({
@@ -142,7 +147,7 @@ function exfont( elem, options ) {
             dataType: 'script',
             scriptCharset: 'UTF-8',
             data: {
-                c: callback,
+                c: callbackName,
                 f: s.fontFamily,
                 t: s.text
             }
@@ -158,11 +163,11 @@ function exfont( elem, options ) {
         if ( !loaded ) return;
         // setter
         if ( value ) {
-            $flash[0].exfontSet(name, value);
+            flashElem.exfontSet(name, value);
             /fontSize|lineHeight|fontWeight|width|height/.test(name) && resize();
         // getter    
         } else {
-            return $flash[0].exfontGet(name);    
+            return flashElem.exfontGet(name);    
         };
     };
     
@@ -183,9 +188,9 @@ function exfont( elem, options ) {
     
     function resize( size ) {
         !size && (size = {});
-        !size.width && (size.width = $flash[0].exfontGet('width'));
-        !size.height && (size.height = $flash[0].exfontGet('height'));
-        $flash.attr(size);
+        !size.width && (size.width = flashElem.exfontGet('width'));
+        !size.height && (size.height = flashElem.exfontGet('height'));
+        $(flashElem).attr(size);
         $elem.css(size);
     };
     
